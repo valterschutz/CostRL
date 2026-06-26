@@ -9,6 +9,7 @@ import pickle
 import gzip
 from collections import defaultdict, deque
 from torch.utils.tensorboard import SummaryWriter
+from tqdm.auto import tqdm
 
 from tianshou.data import Batch, to_numpy, to_torch, to_torch_as
 
@@ -410,23 +411,13 @@ class Runner(object):
         afa_batches = []
         tsk_batches = []
         metrics = defaultdict(list)
-        logging.info(
-            'Collecting %s rollout(s): rand_afa=%s rand_tsk=%s',
-            self.hps.running.train_env_num,
-            rand_afa,
-            rand_tsk,
-        )
-        for episode in range(self.hps.running.train_env_num):
-            logging.info('Collect rollout %s/%s started', episode + 1, self.hps.running.train_env_num)
+        for episode in tqdm(
+            range(self.hps.running.train_env_num),
+            desc='Collect',
+            unit='rollout',
+            leave=False,
+        ):
             afa_batch, tsk_batch, metric = self.rollout(env, rand_afa, rand_tsk)
-            logging.info(
-                'Collect rollout %s/%s finished: episode_length=%s episode_reward=%.4f task_reward=%.4f',
-                episode + 1,
-                self.hps.running.train_env_num,
-                metric['episode_length'],
-                metric['episode_reward'],
-                metric['task_reward'],
-            )
             afa_batches.extend([self._process_traj(traj) for traj in afa_batch])
             tsk_batches.extend([self._process_traj(traj) for traj in tsk_batch])
             for k, v in metric.items():
@@ -456,21 +447,26 @@ class Runner(object):
         # stage1: train model  rand_afa=True  rand_tsk=True
         logging.info('=====Stage 1: train model with random acquisition and random task policy=====')
         self.agent.set_update_status(model=True, afa=False, tsk=False)
-        for step in range(self.hps.running.stage1_iterations):
+        stage1_bar = tqdm(range(self.hps.running.stage1_iterations), desc='Stage 1', unit='step')
+        for step in stage1_bar:
+            stage1_bar.set_postfix_str('collect')
             logging.info('Stage 1 step %s/%s: collect started', step + 1, self.hps.running.stage1_iterations)
             afa_batch, tsk_batch, metrics = self.collect(env, rand_afa=True, rand_tsk=True)
             logging.info('Stage 1 step %s/%s: collect finished', step + 1, self.hps.running.stage1_iterations)
             for k, v in metrics.items():
                 writer.add_scalar(f'stage1_collect/{k}', v, step)
+            stage1_bar.set_postfix_str('learn')
             logging.info('Stage 1 step %s/%s: learn started', step + 1, self.hps.running.stage1_iterations)
             losses = self.agent.learn(afa_batch, tsk_batch)
             logging.info('Stage 1 step %s/%s: learn finished: %s', step + 1, self.hps.running.stage1_iterations, json.dumps(losses, default=float))
             for k, v in losses.items():
                 writer.add_scalar(f'stage1_losses/{k}', v, step)
+            stage1_bar.set_postfix(model_loss=f'{losses["model_loss"]:.4f}')
 
             # save
             if losses['model_loss'] <= best_loss:
                 best_loss = losses['model_loss']
+                stage1_bar.set_postfix_str('save')
                 logging.info('Stage 1 step %s/%s: saving new best model_loss=%.6f', step + 1, self.hps.running.stage1_iterations, best_loss)
                 self.agent.save('stage1_best', with_optim=True)
         
@@ -481,28 +477,35 @@ class Runner(object):
         # stage2: train tsk_policy  rand_afa=True rand_tsk=False
         logging.info('=====Stage 2: train task policy with random acquisition=====')
         self.agent.set_update_status(model=False, afa=False, tsk=True)
-        for step in range(self.hps.running.stage2_iterations):
+        stage2_bar = tqdm(range(self.hps.running.stage2_iterations), desc='Stage 2', unit='step')
+        for step in stage2_bar:
+            stage2_bar.set_postfix_str('collect')
             logging.info('Stage 2 step %s/%s: collect started', step + 1, self.hps.running.stage2_iterations)
             afa_batch, tsk_batch, metrics = self.collect(env, rand_afa=True, rand_tsk=False)
             logging.info('Stage 2 step %s/%s: collect finished', step + 1, self.hps.running.stage2_iterations)
             for k, v in metrics.items():
                 writer.add_scalar(f'stage2_collect/{k}', v, step)
+            stage2_bar.set_postfix_str('learn')
             logging.info('Stage 2 step %s/%s: learn started', step + 1, self.hps.running.stage2_iterations)
             losses = self.agent.learn(afa_batch, tsk_batch)
             logging.info('Stage 2 step %s/%s: learn finished: %s', step + 1, self.hps.running.stage2_iterations, json.dumps(losses, default=float))
             for k, v in losses.items():
                 writer.add_scalar(f'stage2_losses/{k}', v, step)
+            stage2_bar.set_postfix(tsk_loss=f'{losses["tsk_loss"]:.4f}')
 
             # validation
             if step % self.hps.running.validation_freq == 0:
+                stage2_bar.set_postfix_str('validate')
                 logging.info('Stage 2 step %s/%s: validation started', step + 1, self.hps.running.stage2_iterations)
                 metrics = self.valid(rand_afa=True, rand_tsk=False)
                 logging.info('Stage 2 step %s/%s: validation finished', step + 1, self.hps.running.stage2_iterations)
                 for k, v in metrics.items():
                     writer.add_scalar(f'stage2_valid/{k}', v, step)
+                stage2_bar.set_postfix(task_reward=f'{metrics["task_reward"]:.4f}')
                 # save
                 if metrics['task_reward'] >= best_reward:
                     best_reward = metrics['task_reward']
+                    stage2_bar.set_postfix_str('save')
                     logging.info('Stage 2 step %s/%s: saving new best task_reward=%.6f', step + 1, self.hps.running.stage2_iterations, best_reward)
                     self.agent.save('stage2_best', with_optim=True)
         
@@ -513,28 +516,35 @@ class Runner(object):
         # stage3: joint training
         logging.info('=====Stage 3: joint training=====')
         self.agent.set_update_status(model=not self.hps.running.freeze_model, afa=True, tsk=True)
-        for step in range(self.hps.running.stage3_iterations):
+        stage3_bar = tqdm(range(self.hps.running.stage3_iterations), desc='Stage 3', unit='step')
+        for step in stage3_bar:
+            stage3_bar.set_postfix_str('collect')
             logging.info('Stage 3 step %s/%s: collect started', step + 1, self.hps.running.stage3_iterations)
             afa_batch, tsk_batch, metrics = self.collect(env, rand_afa=False, rand_tsk=False)
             logging.info('Stage 3 step %s/%s: collect finished', step + 1, self.hps.running.stage3_iterations)
             for k, v in metrics.items():
                 writer.add_scalar(f'stage3_collect/{k}', v, step)
+            stage3_bar.set_postfix_str('learn')
             logging.info('Stage 3 step %s/%s: learn started', step + 1, self.hps.running.stage3_iterations)
             losses = self.agent.learn(afa_batch, tsk_batch)
             logging.info('Stage 3 step %s/%s: learn finished: %s', step + 1, self.hps.running.stage3_iterations, json.dumps(losses, default=float))
             for k, v in losses.items():
                 writer.add_scalar(f'stage3_losses/{k}', v, step)
+            stage3_bar.set_postfix(tsk_loss=f'{losses["tsk_loss"]:.4f}')
             
             # validation
             if step % self.hps.running.validation_freq == 0:
+                stage3_bar.set_postfix_str('validate')
                 logging.info('Stage 3 step %s/%s: validation started', step + 1, self.hps.running.stage3_iterations)
                 metrics = self.valid(rand_afa=False, rand_tsk=False)
                 logging.info('Stage 3 step %s/%s: validation finished', step + 1, self.hps.running.stage3_iterations)
                 for k, v in metrics.items():
                     writer.add_scalar(f'stage3_valid/{k}', v, step)
+                stage3_bar.set_postfix(task_reward=f'{metrics["task_reward"]:.4f}')
                 # save
                 if metrics['task_reward'] >= best_reward:
                     best_reward = metrics['task_reward']
+                    stage3_bar.set_postfix_str('save')
                     logging.info('Stage 3 step %s/%s: saving new best task_reward=%.6f', step + 1, self.hps.running.stage3_iterations, best_reward)
                     self.agent.save(with_optim=False)
                 # plot
@@ -549,17 +559,13 @@ class Runner(object):
         self.agent.set_training_status(model=False, afa=False, tsk=False)
 
         metrics = defaultdict(list)
-        for episode in range(self.hps.running.num_valid_episodes):
-            logging.info('Validation rollout %s/%s started', episode + 1, self.hps.running.num_valid_episodes)
+        for episode in tqdm(
+            range(self.hps.running.num_valid_episodes),
+            desc='Validate',
+            unit='episode',
+            leave=False,
+        ):
             _, _, metric = self.rollout(env, rand_afa, rand_tsk)
-            logging.info(
-                'Validation rollout %s/%s finished: episode_length=%s episode_reward=%.4f task_reward=%.4f',
-                episode + 1,
-                self.hps.running.num_valid_episodes,
-                metric['episode_length'],
-                metric['episode_reward'],
-                metric['task_reward'],
-            )
             for k, v in metric.items():
                 metrics[k].append(v)
         
