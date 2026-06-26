@@ -1,0 +1,65 @@
+# See configs/paper/README.md for field provenance.
+agent:
+  name: seque_hier_mbppo
+  gamma: 0.99
+  gae_lambda: 0.95
+  ratio_clip: 0.2
+  vf_weight: 0.5
+  ent_weight: 0.01
+  max_history_length: 8
+  num_belief_samples: 10
+  terminal_reward_type: hybrid
+  terminal_reward_weight: 1.0
+  tsk_entropy_term_weight: 1.0
+  tsk_value_term_weight: 1.0
+  mod_impute_term_weight: 1.0
+
+environment:
+  name: sepsis-v0
+  cost: 0.02
+  max_episode_length: 30
+
+model:
+  name: poex_cat_dis
+  categorical_embed_dim: 16
+  action_embed_dim: 16
+  latent_dim: 64
+  time_embed_dim: 16
+  peq_encode_dims: [128, 128, 128, 128]
+  peq_decode_dims: [128, 128, 128, 128]
+  peq_embed_dim: 0
+  prior_trans_dims: [128, 128, 128, 128]
+  posterior_trans_dims: [128, 128, 128, 128]
+  shared_prior_posterior: false
+  num_heads: 4
+  num_inds: 16
+  use_ln: false
+  kl_weight: 1.0
+  num_posterior_samp_train: 1
+  num_posterior_samp_test: 10
+
+policy:
+  categorical_embed_dim: 16
+  belief_embed_type: ensemble
+  belief_embed_dims: [64]
+  actor_layers: [64, 64]
+  critic_layers: [64, 64]
+
+running:
+  exp_dir: experiments/paper/sepsis_seque_mbppo_cost_002
+  device: cpu
+  seed: 0
+  lr_model: 0.0001
+  lr_afa: 0.0003
+  lr_tsk: 0.0003
+  grad_norm: 1.0
+  batch_size: 256
+  train_env_num: 16
+  steps_per_collect: 10
+  stage1_iterations: 1000
+  stage2_iterations: 1000
+  stage3_iterations: 1000
+  freeze_model: false
+  validation_freq: 10
+  num_valid_episodes: 100
+  num_test_episodes: 100

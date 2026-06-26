@@ -5,6 +5,7 @@ sys.path.append(p)
 
 import argparse
 import logging
+from pathlib import Path
 from pprint import pformat
 
 from src.utils.config import read_config, dict2namespace, namespace2dict
@@ -18,6 +19,7 @@ def main():
 
     hps = read_config(args.cfg_file)
 
+    Path(hps.running.exp_dir).mkdir(parents=True, exist_ok=True)
     logging.basicConfig(filename=hps.running.exp_dir + f'/{args.mode}.log',
                     filemode='w',
                     level=logging.INFO,
