@@ -596,7 +596,12 @@ class Runner(object):
         afa_batches = []
         tsk_batches = []
         metrics = defaultdict(list)
-        for _ in range(self.hps.running.num_test_episodes):
+        for _ in tqdm(
+            range(self.hps.running.num_test_episodes),
+            desc='Test',
+            unit='episode',
+            leave=False,
+        ):
             afa_batch, tsk_batch, metric = self.rollout(env, False, False)
             for k, v in metric.items():
                 metrics[k].append(v)
