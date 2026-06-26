@@ -2,3 +2,5 @@
 **/*.log
 **/*.pth
 **/*events.out*
+.venv/
+experiments/

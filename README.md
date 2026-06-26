@@ -1,5 +1,27 @@
 # Towards Cost Sensitive Decision Making
 
+## Setup
+
+This repository includes a `requirements.txt` verified with `uv` and Python 3.10.
+
+```bash
+uv venv --python 3.10 .venv
+uv pip install --python .venv/bin/python -r requirements.lock
+```
+
+Run commands through the virtualenv Python:
+
+```bash
+.venv/bin/python scripts/run_agent.py --cfg_file=configs/paper/sepsis_seque_mbppo_cost_001.yaml --mode=train
+```
+
+Notes:
+
+- The original `environment.txt` is a conda export for Python 3.7 and PyTorch 1.11.
+- The uv environment uses `torch==2.2.2+cpu` because `torch==1.11.0` failed to load on this system.
+- The package is `nflows`, not `nflow`; the old `requirements.txt` name was a typo.
+- `requirements.txt` lists direct dependencies; `requirements.lock` pins the full resolved uv environment.
+
 ## Usage
 ```bash
 python scripts/run_agent.py --cfg_file=path/to/config --mode=train/test
