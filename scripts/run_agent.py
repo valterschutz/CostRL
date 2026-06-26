@@ -20,20 +20,31 @@ def main():
     hps = read_config(args.cfg_file)
 
     Path(hps.running.exp_dir).mkdir(parents=True, exist_ok=True)
-    logging.basicConfig(filename=hps.running.exp_dir + f'/{args.mode}.log',
-                    filemode='w',
-                    level=logging.INFO,
-                    format='%(asctime)s %(message)s')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s %(levelname)s %(message)s',
+        handlers=[
+            logging.FileHandler(hps.running.exp_dir + f'/{args.mode}.log', mode='w'),
+            logging.StreamHandler(sys.stdout),
+        ],
+        force=True,
+    )
     logging.info('\n\n Config:\n\n'+pformat(namespace2dict(hps)))
 
+    logging.info('Creating runner for agent=%s environment=%s', hps.agent.name, hps.environment.name)
     runner = get_runner(hps)
+    logging.info('Runner created')
 
     if args.mode == 'train':
+        logging.info('Starting training')
         runner.train()
     elif args.mode == 'test':
+        logging.info('Starting test')
         runner.test()
     elif args.mode == 'run':
+        logging.info('Starting training')
         runner.train()
+        logging.info('Starting test')
         runner.test()
     else:
         raise ValueError()
